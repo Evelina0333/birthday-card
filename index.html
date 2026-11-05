@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Happy Birthday Han!</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            background-color: #05040a;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+        }
+        #webgl-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        #camera-video {
+            display: none;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 30px;
+        }
+        .header {
+            text-align: center;
+        }
+        .header h1 {
+            font-size: 2.2rem;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            background: linear-gradient(45deg, #ff9a9e, #fecfef, #a1c4fd);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 20px rgba(255,182,193,0.3);
+        }
+        .header p {
+            font-size: 0.95rem;
+            color: rgba(255, 255, 255, 0.6);
+            margin-top: 5px;
+        }
+        .controls-info {
+            background: rgba(20, 15, 30, 0.55);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 15px 25px;
+            border-radius: 20px;
+            align-self: center;
+            display: flex;
+            gap: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            pointer-events: auto;
+        }
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.9rem;
+            color: #d1d5db;
+        }
+        .indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: #ef4444;
+            box-shadow: 0 0 8px #ef4444;
+            transition: all 0.3s ease;
+        }
+        .indicator.active {
+            background-color: #10b981;
+            box-shadow: 0 0 8px #10b981;
+        }
+        #audio-btn {
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            pointer-events: auto;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 12px;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(5px);
+        }
+        #audio-btn:hover {
+            background: rgba(255, 255, 255, 0.25);
+            transform: scale(1.05);
+        }
+        #audio-btn svg {
+            width: 20px;
+            height: 20px;
+            fill: currentColor;
+            display: block;
+        }
+    </style>
+
+    <!-- Three.js & Post-processing Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+
+    <!-- MediaPipe Hands & Camera -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+    <div id="webgl-container"></div>
+    <video id="camera-video" playsinline></video>
+
+    <div id="ui-layer">
+        <div class="header">
+            <h1>Make A Wish</h1>
+            <p>Open your hand to unlock the magical birthday card</p>
+        </div>
+
+        <div class="controls-info">
+            <div class="status-item">
+                <div id="cam-indicator" class="indicator"></div>
+                <span>Camera Tracking</span>
+            </div>
+            <div class="status-item">
+                <div id="hand-indicator" class="indicator"></div>
+                <span id="hand-text">Hand Closed / Not Detected</span>
+            </div>
+        </div>
+
+        <button id="audio-btn" title="Toggle Sound">
+            <svg id="music-icon" viewBox="0 0 24 24">
+                <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+            </svg>
+        </button>
+    </div>
+
+    <script>
+        // --- 1. Audio Synthesizer (Happy Birthday Tune) ---
+        class BirthdayAudio {
+            constructor() {
+                this.ctx = null;
+                this.isPlaying = false;
+                this.timer = null;
+                this.muted = false;
+                
+                // Notes & Durations (Happy Birthday in C Major)
+                this.notes = [
+                    {f: 261.63, d: 0.4}, {f: 261.63, d: 0.4}, {f: 293.66, d: 0.8}, {f: 261.63, d: 0.8}, {f: 349.23, d: 0.8}, {f: 329.63, d: 1.2},
+                    {f: 261.63, d: 0.4}, {f: 261.63, d: 0.4}, {f: 293.66, d: 0.8}, {f: 261.63, d: 0.8}, {f: 392.00, d: 0.8}, {f: 349.23, d: 1.2},
+                    {f: 261.63, d: 0.4}, {f: 261.63, d: 0.4}, {f: 523.25, d: 0.8}, {f: 440.00, d: 0.8}, {f: 349.23, d: 0.8}, {f: 329.63, d: 0.8}, {f: 293.66, d: 0.8},
+                    {f: 466.16, d: 0.4}, {f: 466.16, d: 0.4}, {f: 440.00, d: 0.8}, {f: 349.23, d: 0.8}, {f: 392.00, d: 0.8}, {f: 349.23, d: 1.4}
+                ];
+            }
+
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+
+            playTone(freq, duration) {
+                if (!this.ctx || this.muted) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                
+                gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration * 0.9);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + duration);
+            }
+
+            start() {
+                this.init();
+                if (this.isPlaying) return;
+                this.isPlaying = true;
+                let step = 0;
+
+                const playNext = () => {
+                    if (!this.isPlaying) return;
+                    const note = this.notes[step];
+                    this.playTone(note.f, note.d);
+                    step = (step + 1) % this.notes.length;
+                    this.timer = setTimeout(playNext, note.d * 600);
+                };
+                playNext();
+            }
+
+            stop() {
+                this.isPlaying = false;
+                if (this.timer) clearTimeout(this.timer);
+            }
+        }
+
+        const audioSys = new BirthdayAudio();
+        document.getElementById('audio-btn').addEventListener('click', () => {
+            audioSys.muted = !audioSys.muted;
+            document.getElementById('audio-btn').style.opacity = audioSys.muted ? '0.4' : '1';
+        });
+
+        // --- 2. Canvas Textures Generation ---
+        function createCoverTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 1448;
+            const ctx = canvas.getContext('2d');
+
+            // Background
+            const bgGrad = ctx.createLinearGradient(0, 0, 1024, 1448);
+            bgGrad.addColorStop(0, '#2b1055');
+            bgGrad.addColorStop(1, '#7597de');
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(0, 0, 1024, 1448);
+
+            // Gold Border Pattern
+            ctx.strokeStyle = '#dfb76c';
+            ctx.lineWidth = 16;
+            ctx.strokeRect(40, 40, 944, 1368);
+            ctx.lineWidth = 4;
+            ctx.strokeRect(60, 60, 904, 1328);
+
+            // Draw Cute Birthday Cake
+            const cx = 512, cy = 800;
+
+            // Plate
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.ellipse(cx, cy + 220, 260, 40, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Cake Bottom Layer
+            ctx.fillStyle = '#ff85a1';
+            ctx.beginPath();
+            ctx.roundRect(cx - 200, cy + 30, 400, 160, [0, 0, 20, 20]);
+            ctx.fill();
+
+            // Cake Top Layer
+            ctx.fillStyle = '#fbb1bd';
+            ctx.beginPath();
+            ctx.roundRect(cx - 140, cy - 80, 280, 120, [15, 15, 0, 0]);
+            ctx.fill();
+
+            // Icing Drips
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(cx - 140 + 20, cy - 80, 25, 0, Math.PI);
+            ctx.arc(cx - 140 + 70, cy - 80, 35, 0, Math.PI);
+            ctx.arc(cx - 140 + 140, cy - 80, 30, 0, Math.PI);
+            ctx.arc(cx - 140 + 210, cy - 80, 35, 0, Math.PI);
+            ctx.arc(cx - 140 + 260, cy - 80, 25, 0, Math.PI);
+            ctx.fill();
+
+            // Candles
+            const candleColors = ['#4ea8de', '#ffd166', '#06d6a0'];
+            [-70, 0, 70].forEach((xOffset, idx) => {
+                ctx.fillStyle = candleColors[idx];
+                ctx.fillRect(cx + xOffset - 10, cy - 170, 20, 90);
+                
+                // Candle Flame
+                ctx.fillStyle = '#ff9e00';
+                ctx.beginPath();
+                ctx.ellipse(cx + xOffset, cy - 190, 10, 20, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#ffea00';
+                ctx.beginPath();
+                ctx.ellipse(cx + xOffset, cy - 185, 5, 10, 0, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // Decorative Sprinkles
+            const colors = ['#ff477e', '#ffd166', '#06d6a0', '#118ab2', '#ffffff'];
+            for(let i = 0; i < 40; i++) {
+                ctx.fillStyle = colors[i % colors.length];
+                ctx.beginPath();
+                ctx.arc(cx - 180 + Math.random() * 360, cy - 60 + Math.random() * 220, 6, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Cover Typography
+            ctx.fillStyle = '#f72585';
+            ctx.font = 'bold 76px "Segoe UI", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('HAPPY BIRTHDAY', cx, 320);
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.anisotropy = 16;
+            return tex;
+        }
+
+        function createInsideRightTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 1448;
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#fffdfa';
+            ctx.fillRect(0, 0, 1024, 1448);
+
+            // Subtle inner border
+            ctx.strokeStyle = '#e2d9cc';
+            ctx.lineWidth = 6;
+            ctx.strokeRect(50, 50, 924, 1348);
+
+            ctx.fillStyle = '#1e1b18';
+            ctx.textAlign = 'center';
+
+            // Title
+            ctx.font = 'italic bold 72px "Georgia", serif';
+            ctx.fillStyle = '#c9184a';
+            ctx.fillText('Dear Han,', 512, 240);
+
+            ctx.font = 'bold 64px "Georgia", serif';
+            ctx.fillStyle = '#2b2d42';
+            ctx.fillText('Happy Birthday!', 512, 360);
+
+            // Decorative Line
+            ctx.strokeStyle = '#ffb5a7';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(312, 420);
+            ctx.lineTo(712, 420);
+            ctx.stroke();
+
+            // Wishes Text
+            ctx.font = '38px "Segoe UI", sans-serif';
+            ctx.fillStyle = '#4a4e69';
+            const lines = [
+                'May your year be filled with',
+                'unending joy, glowing success,',
+                'and wonderful adventures.',
+                '',
+                'Stay passionate, stay brilliant,',
+                'and keep shining brightly every day!',
+                '',
+                'Best Wishes,'
+            ];
+
+            lines.forEach((line, index) => {
+                ctx.fillText(line, 512, 540 + (index * 65));
+            });
+
+            ctx.font = 'italic bold 44px "Georgia", serif';
+            ctx.fillStyle = '#800f2f';
+            ctx.fillText('— Your Special Friend', 512, 1150);
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.anisotropy = 16;
+            return tex;
+        }
+
+        function createInsideLeftTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 1448;
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#fff9f5';
+            ctx.fillRect(0, 0, 1024, 1448);
+
+            // Decorative soft elements
+            ctx.strokeStyle = '#f8edeb';
+            ctx.lineWidth = 10;
+            ctx.strokeRect(40, 40, 944, 1368);
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.anisotropy = 16;
+            return tex;
+        }
+
+        // --- 3. Three.js Setup & Post-processing ---
+        const container = document.getElementById('webgl-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x05040a, 0.035);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 2, 11);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.1;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxDistance = 18;
+        controls.minDistance = 5;
+        controls.maxPolarAngle = Math.PI / 2 + 0.1;
+
+        // Cinematic Post-processing (Bloom)
+        const composer = new THREE.EffectComposer(renderer);
+        const renderPass = new THREE.RenderPass(scene, camera);
+        composer.addPass(renderPass);
+
+        const bloomPass = new THREE.UnrealBloomPass(
+            new THREE.Vector2(window.innerWidth, window.innerHeight),
+            0.8,  // strength
+            0.4,  // radius
+            0.85  // threshold
+        );
+        composer.addPass(bloomPass);
+
+        // --- 4. Lighting (Cinematic Candle Atmosphere) ---
+        const ambientLight = new THREE.AmbientLight(0x1a0f2e, 0.8);
+        scene.add(ambientLight);
+
+        // Warm flickering candlelight
+        const candleLight = new THREE.PointLight(0xffaa44, 3.5, 25);
+        candleLight.position.set(0, -1, 3);
+        candleLight.castShadow = true;
+        scene.add(candleLight);
+
+        // Subtle fill lights for cinematic contrast
+        const blueRimLight = new THREE.DirectionalLight(0x3a5a40, 1.2);
+        blueRimLight.position.set(-8, 10, -5);
+        scene.add(blueRimLight);
+
+        const warmLight = new THREE.DirectionalLight(0xffbe0b, 1.0);
+        warmLight.position.set(5, 8, 5);
+        scene.add(warmLight);
+
+        // Ambient Candle Dust Particles
+        const dustGeo = new THREE.BufferGeometry();
+        const dustCount = 250;
+        const dustPos = new Float32Array(dustCount * 3);
+        for(let i = 0; i < dustCount * 3; i+=3) {
+            dustPos[i] = (Math.random() - 0.5) * 20;
+            dustPos[i+1] = (Math.random() - 0.5) * 15;
+            dustPos[i+2] = (Math.random() - 0.5) * 20;
+        }
+        dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+        const dustMat = new THREE.PointsMaterial({
+            size: 0.06,
+            color: 0xffb703,
+            transparent: true,
+            opacity: 0.5,
+            blending: THREE.AdditiveBlending
+        });
+        const dustParticles = new THREE.Points(dustGeo, dustMat);
+        scene.add(dustParticles);
+
+        // --- 5. 3D Birthday Card Construction ---
+        const cardGroup = new THREE.Group();
+        scene.add(cardGroup);
+
+        const cardWidth = 4.2;
+        const cardHeight = 6.0;
+        const cardThickness = 0.04;
+
+        // Card Materials
+        const coverTex = createCoverTexture();
+        const insideRightTex = createInsideRightTexture();
+        const insideLeftTex = createInsideLeftTexture();
+        const paperEdgeMat = new THREE.MeshStandardMaterial({ color: 0xf4f1de, roughness: 0.8 });
+
+        // Base Cover (Bottom Half of Card when opened upward)
+        const baseGeo = new THREE.BoxGeometry(cardWidth, cardHeight, cardThickness);
+        const baseMats = [
+            paperEdgeMat, paperEdgeMat, paperEdgeMat, paperEdgeMat,
+            new THREE.MeshStandardMaterial({ map: insideRightTex, roughness: 0.4 }),
+            new THREE.MeshStandardMaterial({ color: 0x2b1055, roughness: 0.5 })
+        ];
+        const baseCover = new THREE.Mesh(baseGeo, baseMats);
+        baseCover.position.set(0, -cardHeight / 2, 0);
+        baseCover.receiveShadow = true;
+        baseCover.castShadow = true;
+        cardGroup.add(baseCover);
+
+        // Top Cover Hinge Mechanism
+        const hingeGroup = new THREE.Group();
+        hingeGroup.position.set(0, 0, 0); // Pivot axis at top of base cover
+        cardGroup.add(hingeGroup);
+
+        const topGeo = new THREE.BoxGeometry(cardWidth, cardHeight, cardThickness);
+        const topMats = [
+            paperEdgeMat, paperEdgeMat, paperEdgeMat, paperEdgeMat,
+            new THREE.MeshStandardMaterial({ map: coverTex, roughness: 0.3, metalness: 0.1 }),
+            new THREE.MeshStandardMaterial({ map: insideLeftTex, roughness: 0.4 })
+        ];
+        const topCover = new THREE.Mesh(topGeo, topMats);
+        topCover.position.set(0, cardHeight / 2, 0);
+        topCover.castShadow = true;
+        topCover.receiveShadow = true;
+        hingeGroup.add(topCover);
+
+        // --- 6. Confetti & Heart Particles System ---
+        function createHeartShape() {
+            const shape = new THREE.Shape();
+            const x = 0, y = 0;
+            shape.moveTo(x + 0.25, y + 0.25);
+            shape.bezierCurveTo(x + 0.25, y + 0.25, x + 0.2, y, x, y);
+            shape.bezierCurveTo(x - 0.3, y, x - 0.3, y + 0.35, x - 0.3, y + 0.35);
+            shape.bezierCurveTo(x - 0.3, y + 0.55, x - 0.1, y + 0.77, x + 0.25, y + 1.0);
+            shape.bezierCurveTo(x + 0.6, y + 0.77, x + 0.8, y + 0.55, x + 0.8, y + 0.35);
+            shape.bezierCurveTo(x + 0.8, y + 0.35, x + 0.8, y, x + 0.5, y);
+            shape.bezierCurveTo(x + 0.35, y, x + 0.25, y + 0.25, x + 0.25, y + 0.25);
+            return shape;
+        }
+
+        const heartGeo = new THREE.ExtrudeGeometry(createHeartShape(), {
+            depth: 0.02,
+            bevelEnabled: true,
+            bevelSegments: 2,
+            steps: 1,
+            bevelSize: 0.02,
+            bevelThickness: 0.02
+        });
+        heartGeo.center();
+        heartGeo.scale(0.18, 0.18, 0.18);
+
+        const heartColors = [0xff4d6d, 0xff758f, 0xffb3c1, 0xff8fa3, 0xc9184a, 0xffb703];
+        const confettiParticles = [];
+
+        function burstConfetti() {
+            const count = 75;
+            for (let i = 0; i < count; i++) {
+                const mat = new THREE.MeshStandardMaterial({
+                    color: heartColors[Math.floor(Math.random() * heartColors.length)],
+                    roughness: 0.3,
+                    metalness: 0.2,
+                    side: THREE.DoubleSide
+                });
+                const mesh = new THREE.Mesh(heartGeo, mat);
+                mesh.position.set(0, 0, 0.1);
+
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 0.08 + Math.random() * 0.12;
+
+                confettiParticles.push({
+                    mesh: mesh,
+                    vel: new THREE.Vector3(
+                        Math.cos(angle) * speed,
+                        Math.sin(angle) * speed + 0.08,
+                        (Math.random() - 0.3) * 0.1
+                    ),
+                    rotSpeed: new THREE.Vector3(
+                        (Math.random() - 0.5) * 0.2,
+                        (Math.random() - 0.5) * 0.2,
+                        (Math.random() - 0.5) * 0.2
+                    ),
+                    life: 1.0
+                });
+                scene.add(mesh);
+            }
+        }
+
+        function updateConfetti() {
+            for (let i = confettiParticles.length - 1; i >= 0; i--) {
+                const p = confettiParticles[i];
+                p.mesh.position.add(p.vel);
+                p.mesh.rotation.x += p.rotSpeed.x;
+                p.mesh.rotation.y += p.rotSpeed.y;
+                p.mesh.rotation.z += p.rotSpeed.z;
+
+                p.vel.y -= 0.0025; // gravity
+                p.vel.x *= 0.98;
+                p.vel.z *= 0.98;
+                p.life -= 0.008;
+
+                p.mesh.scale.setScalar(Math.max(0, p.life * 0.18));
+
+                if (p.life <= 0) {
+                    scene.remove(p.mesh);
+                    p.mesh.geometry.dispose();
+                    p.mesh.material.dispose();
+                    confettiParticles.splice(i, 1);
+                }
+            }
+        }
+
+        // --- 7. State & Animation Controller ---
+        let targetOpenProgress = 0;
+        let currentOpenProgress = 0;
+        let wasOpened = false;
+
+        function updateCardState(delta) {
+            // Smoothly interpolate card opening angle (0 = Closed, 1 = Fully Opened 170 degrees)
+            currentOpenProgress += (targetOpenProgress - currentOpenProgress) * 4.0 * delta;
+            
+            // Flip hinge angle up to ~165 degrees
+            hingeGroup.rotation.x = currentOpenProgress * (Math.PI * 0.92);
+
+            // Trigger burst effect and music upon passing threshold
+            if (currentOpenProgress > 0.65 && !wasOpened) {
+                wasOpened = true;
+                burstConfetti();
+                audioSys.start();
+            } else if (currentOpenProgress < 0.15 && wasOpened) {
+                wasOpened = false;
+                audioSys.stop();
+            }
+        }
+
+        // --- 8. MediaPipe Hand Tracking Setup ---
+        const videoElement = document.getElementById('camera-video');
+        const camIndicator = document.getElementById('cam-indicator');
+        const handIndicator = document.getElementById('hand-indicator');
+        const handText = document.getElementById('hand-text');
+
+        function onHandResults(results) {
+            camIndicator.classList.add('active');
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+
+                // Calculate distance between Wrist (0) and Finger Tips (8, 12, 16, 20)
+                const wrist = landmarks[0];
+                const tips = [8, 12, 16, 20];
+
+                let averageDistance = 0;
+                tips.forEach(tipIdx => {
+                    const tip = landmarks[tipIdx];
+                    const dist = Math.hypot(tip.x - wrist.x, tip.y - wrist.y, tip.z - wrist.z);
+                    averageDistance += dist;
+                });
+                averageDistance /= tips.length;
+
+                // Threshold determination for Open vs Closed Hand
+                if (averageDistance > 0.38) {
+                    targetOpenProgress = 1;
+                    handIndicator.classList.add('active');
+                    handText.textContent = "Hand Opened (Card Unlocked)";
+                } else {
+                    targetOpenProgress = 0;
+                    handIndicator.classList.remove('active');
+                    handText.textContent = "Hand Closed (Card Folded)";
+                }
+            } else {
+                handIndicator.classList.remove('active');
+                handText.textContent = "No Hand Detected";
+            }
+        }
+
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.6,
+            minTrackingConfidence: 0.6
+        });
+
+        hands.onResults(onHandResults);
+
+        const cameraUtils = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({ image: videoElement });
+            },
+            width: 640,
+            height: 480
+        });
+
+        cameraUtils.start().catch(err => {
+            console.warn("Camera failed or denied access:", err);
+            handText.textContent = "Camera Error / Blocked";
+        });
+
+        // --- 9. Render Loop ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+            const elapsedTime = clock.getElapsedTime();
+
+            // Subtle Candle Light Flicker Effect
+            candleLight.intensity = 3.2 + Math.sin(elapsedTime * 12) * 0.3 + Math.cos(elapsedTime * 23) * 0.2;
+            candleLight.position.x = Math.sin(elapsedTime * 2) * 0.3;
+
+            // Float Card Slightly for Magical Atmosphere
+            cardGroup.position.y = Math.sin(elapsedTime * 1.5) * 0.1;
+
+            // Dust Particles Movement
+            dustParticles.rotation.y = elapsedTime * 0.03;
+
+            updateCardState(delta);
+            updateConfetti();
+
+            controls.update();
+            composer.render();
+        }
+
+        animate();
+
+        // --- 10. Responsive Window Resizing ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
